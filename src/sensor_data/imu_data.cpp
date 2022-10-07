@@ -2,65 +2,87 @@
  * @Description: imu data
  * @Author: Ren Qian
  * @Date: 2020-02-23 22:20:41
+ * @LastEditors: ZiJieChen
+ * @LastEditTime: 2022-09-21 21:27:11
  */
-#include "lidar_localization/sensor_data/imu_data.hpp"
-
-#include <cmath>
-#include "glog/logging.h"
+#include "lidar_localization/sensor_data/imu_data.h"
 
 namespace lidar_localization {
-Eigen::Matrix3f IMUData::GetOrientationMatrix() {
-    Eigen::Quaterniond q(orientation.w, orientation.x, orientation.y, orientation.z);
-    Eigen::Matrix3f matrix = q.matrix().cast<float>();
 
-    return matrix;
-}
-
-bool IMUData::SyncData(std::deque<IMUData>& UnsyncedData, std::deque<IMUData>& SyncedData, double sync_time) {
-    while (UnsyncedData.size() >= 2) {
-        if (UnsyncedData.front().time > sync_time) 
-            return false;
-        if (UnsyncedData.at(1).time < sync_time) {
-            UnsyncedData.pop_front();
-            continue;
-        }
-        if (sync_time - UnsyncedData.front().time > 0.2) {
-            UnsyncedData.pop_front();
-            break;
-        }
-        
-        if (UnsyncedData.at(1).time - sync_time > 0.2) {
-            UnsyncedData.pop_front();
-            break;
-        }
-        break;
+bool IMUData::SyncData(double sync_time,
+                       std::deque<IMUData>& UnsyncedData,
+                       std::deque<IMUData>& SyncedData) {
+  // 传感器数据按时间序列排列，在传感器数据中为同步的时间点找到合适的时间位置
+  // 即找到与同步时间相邻的左右两个数据
+  // 需要注意的是，如果左右相邻数据有一个离同步时间差值比较大，则说明数据有丢失，时间离得太远不适合做差值
+  while (UnsyncedData.size() >= 2) {
+    // UnsyncedData.front().time_ should be <= sync_time:
+    if (UnsyncedData.front().time_ > sync_time)
+      return false;
+    // sync_time should be <= UnsyncedData.at(1).time_:
+    if (UnsyncedData.at(1).time_ < sync_time) {
+      UnsyncedData.pop_front();
+      continue;
     }
-    if (UnsyncedData.size() < 2)
-        return false;
 
-    IMUData front_data = UnsyncedData.at(0);
-    IMUData back_data = UnsyncedData.at(1);
-    IMUData synced_data;
+    // sync_time - UnsyncedData.front().time_ should be <= 0.2:
+    if (sync_time - UnsyncedData.front().time_ > 0.2) {
+      UnsyncedData.pop_front();
+      return false;
+    }
+    // UnsyncedData.at(1).time_ - sync_time should be <= 0.2
+    if (UnsyncedData.at(1).time_ - sync_time > 0.2) {
+      UnsyncedData.pop_front();
+      return false;
+    }
+    break;
+  }
+  if (UnsyncedData.size() < 2) {
+    return false;
+  }
 
-    double front_scale = (back_data.time - sync_time) / (back_data.time - front_data.time);
-    double back_scale = (sync_time - front_data.time) / (back_data.time - front_data.time);
-    synced_data.time = sync_time;
-    synced_data.linear_acceleration.x = front_data.linear_acceleration.x * front_scale + back_data.linear_acceleration.x * back_scale;
-    synced_data.linear_acceleration.y = front_data.linear_acceleration.y * front_scale + back_data.linear_acceleration.y * back_scale;
-    synced_data.linear_acceleration.z = front_data.linear_acceleration.z * front_scale + back_data.linear_acceleration.z * back_scale;
-    synced_data.angular_velocity.x = front_data.angular_velocity.x * front_scale + back_data.angular_velocity.x * back_scale;
-    synced_data.angular_velocity.y = front_data.angular_velocity.y * front_scale + back_data.angular_velocity.y * back_scale;
-    synced_data.angular_velocity.z = front_data.angular_velocity.z * front_scale + back_data.angular_velocity.z * back_scale;
+  IMUData front_data = UnsyncedData.at(0);
+  IMUData back_data = UnsyncedData.at(1);
+  IMUData synced_data;
 
-    synced_data.orientation.x = front_data.orientation.x * front_scale + back_data.orientation.x * back_scale;
-    synced_data.orientation.y = front_data.orientation.y * front_scale + back_data.orientation.y * back_scale;
-    synced_data.orientation.z = front_data.orientation.z * front_scale + back_data.orientation.z * back_scale;
-    synced_data.orientation.w = front_data.orientation.w * front_scale + back_data.orientation.w * back_scale;
+  const double front_scale =
+      (back_data.time_ - sync_time) / (back_data.time_ - front_data.time_);
+  const double back_scale =
+      (sync_time - front_data.time_) / (back_data.time_ - front_data.time_);
+  synced_data.time_ = sync_time;
+  synced_data.linear_acceleration_.x =
+      front_data.linear_acceleration_.x * front_scale +
+      back_data.linear_acceleration_.x * back_scale;
+  synced_data.linear_acceleration_.y =
+      front_data.linear_acceleration_.y * front_scale +
+      back_data.linear_acceleration_.y * back_scale;
+  synced_data.linear_acceleration_.z =
+      front_data.linear_acceleration_.z * front_scale +
+      back_data.linear_acceleration_.z * back_scale;
+  synced_data.angular_velocity_.x =
+      front_data.angular_velocity_.x * front_scale +
+      back_data.angular_velocity_.x * back_scale;
+  synced_data.angular_velocity_.y =
+      front_data.angular_velocity_.y * front_scale +
+      back_data.angular_velocity_.y * back_scale;
+  synced_data.angular_velocity_.z =
+      front_data.angular_velocity_.z * front_scale +
+      back_data.angular_velocity_.z * back_scale;
+  // 四元数插值有线性插值和球面插值，球面插值更准确，但是两个四元数差别不大是，二者精度相当
+  // 由于是对相邻两时刻姿态插值，姿态差比较小，所以可以用线性插值
+  synced_data.orientation_.x = front_data.orientation_.x * front_scale +
+                               back_data.orientation_.x * back_scale;
+  synced_data.orientation_.y = front_data.orientation_.y * front_scale +
+                               back_data.orientation_.y * back_scale;
+  synced_data.orientation_.z = front_data.orientation_.z * front_scale +
+                               back_data.orientation_.z * back_scale;
+  synced_data.orientation_.w = front_data.orientation_.w * front_scale +
+                               back_data.orientation_.w * back_scale;
+  // 线性插值之后要归一化
+  synced_data.orientation_.Normlize();
 
-    synced_data.orientation.Normlize();
+  SyncedData.push_back(synced_data);
 
-    SyncedData.push_back(synced_data);
-
-    return true;
+  return true;
 }
-}
+}  // namespace lidar_localization

@@ -1,0 +1,4 @@
+add_subdirectory(back_end)
+add_subdirectory(front_end)
+add_subdirectory(loop_closing)
+add_subdirectory(viewer)

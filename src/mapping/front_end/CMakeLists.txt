@@ -1,0 +1,14 @@
+file(GLOB ALL_SOURCE "*.cpp")
+
+add_library(MAPPING_FRONT_END SHARED
+  ${ALL_SOURCE}
+)
+
+target_link_libraries(MAPPING_FRONT_END
+  ${catkin_LIBRARIES}
+  SUBSCRIBER
+  PUBLISHER
+  CLOUD_FILTER
+  REGISTRATION
+  TOOLS
+)
